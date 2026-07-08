@@ -38,6 +38,7 @@ npm start
     "https://www.facebook.com/profile.php?id=xxx"
   ],
   "checkIntervalMinutes": 5,
+  "maxPostsPerCycle": 5,
   "reaction": "love",
   "comments": [
     "Tuyệt vời 🥰",
@@ -54,6 +55,7 @@ npm start
 |---------|--------|
 | `pageUrls` | Danh sách URL các Fanpage/Profile cần theo dõi |
 | `checkIntervalMinutes` | Thời gian nghỉ giữa các chu kỳ kiểm tra (phút) |
+| `maxPostsPerCycle` | Số bài viết mới tối đa được tương tác trong 1 chu kỳ (mặc định 5). Bài còn dư sẽ được xử lý ở chu kỳ sau |
 | `reaction` | Loại cảm xúc: `like`, `love`, `haha`, `wow`, `sad`, `angry` |
 | `comments` | Danh sách các câu bình luận (Bot sẽ chọn ngẫu nhiên) |
 | `delayBetweenActions` | Khoảng thời gian chờ ngẫu nhiên giữa các bước (giây) |

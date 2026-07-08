@@ -1,12 +1,16 @@
 {
-  "pageUrl": "https://www.facebook.com/profile.php?id=61583868984109",
-  "checkIntervalMinutes": 3,
+  "pageUrls": [
+    "https://www.facebook.com/profile.php?id=61577828144363",
+    "https://www.facebook.com/profile.php?id=61578987511264"
+  ],
+  "checkIntervalMinutes": 60,
+  "maxPostsPerCycle": 5,
   "reaction": "love",
   "comments": [
-    "Tuyệt vời 🥰"
+    "❤️❤️❤️"
   ],
   "delayBetweenActions": {
     "minSeconds": 5,
-    "maxSeconds": 12
+    "maxSeconds": 10
   }
 }
