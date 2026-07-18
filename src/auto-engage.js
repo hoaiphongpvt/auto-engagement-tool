@@ -99,17 +99,21 @@ async function interactWithPost(page, targetLikeButton, config) {
   const labelsToFind = reactionMap[reaction.toLowerCase()] || reactionMap.like;
   let reactionClicked = false;
 
-  // Look for the reaction popup options
+  // Look for the reaction popup options.
+  // Có thể tồn tại nhiều phần tử trùng aria-label (bảng cảm xúc của bài trước
+  // chưa bị gỡ khỏi DOM); bảng vừa mở luôn nằm cuối DOM nên duyệt ngược
+  // và chỉ lấy nút đang hiển thị.
   for (const label of labelsToFind) {
-      const rxBtn = await page.$(`div[aria-label="${label}"]`);
-      if (rxBtn) {
-          const rxBox = await rxBtn.boundingBox();
+      const rxBtns = await page.$$(`div[aria-label="${label}"]`);
+      for (let i = rxBtns.length - 1; i >= 0; i--) {
+          const rxBox = await rxBtns[i].boundingBox();
           if (rxBox && rxBox.width > 0) {
-              await rxBtn.click();
+              await rxBtns[i].click();
               reactionClicked = true;
               break;
           }
       }
+      if (reactionClicked) break;
   }
 
   if (!reactionClicked) {
@@ -142,23 +146,25 @@ async function interactWithPost(page, targetLikeButton, config) {
   let commented = false;
 
   if (commentClicked) {
-      // Chờ Facebook mở và auto-focus ô bình luận
-      await randomDelay(2, 3);
+      // Chờ Facebook mở và auto-focus ô bình luận. Composer có thể mở inline
+      // hoặc dạng hộp thoại (popup) và tốc độ tùy mạng, nên chờ kiểu poll
+      // thay vì chỉ kiểm tra một lần.
+      let isActiveTextbox = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+          await randomDelay(1, 1.5);
+          isActiveTextbox = await page.evaluate(() => {
+              const el = document.activeElement;
+              return !!el && el.getAttribute('role') === 'textbox';
+          });
+          if (isActiveTextbox) break;
+      }
 
       log("Đang nhập bình luận...", "info");
       const commentText = randomChoice(comments);
 
-      // Lấy chính xác ô textbox đang được focus (Facebook tự động focus sau khi bấm Viết bình luận)
-      const activeElementHandle = await page.evaluateHandle(() => {
-          return document.activeElement;
-      });
-
-      const isActiveTextbox = await page.evaluate((el) => {
-          return el && el.getAttribute('role') === 'textbox';
-      }, activeElementHandle);
-
       if (isActiveTextbox) {
-          // Bấm thêm 1 lần cho chắc chắn
+          // Lấy chính xác ô textbox đang được focus và bấm thêm 1 lần cho chắc chắn
+          const activeElementHandle = await page.evaluateHandle(() => document.activeElement);
           await activeElementHandle.click();
           await randomDelay(1, 2);
           await page.keyboard.type(commentText, { delay: 60 });
@@ -170,6 +176,13 @@ async function interactWithPost(page, targetLikeButton, config) {
           // Fallback: Tìm textbox gần nút Like nhất
           log("Không thấy ô bình luận auto-focus, tìm xung quanh bài viết...", "warn");
           const fallbackBox = await page.evaluateHandle((likeBtn) => {
+              // Ưu tiên hộp thoại bình luận đang mở (Facebook thường mở dạng popup
+              // ở cấp document nên không nằm trong cây DOM của bài viết)
+              const dialogs = document.querySelectorAll('div[role="dialog"]');
+              for (let i = dialogs.length - 1; i >= 0; i--) {
+                  const tb = dialogs[i].querySelector('div[role="textbox"]');
+                  if (tb) return tb;
+              }
               let wrapper = likeBtn;
               for(let i=0; i<8; i++) {
                   if(wrapper.parentElement) wrapper = wrapper.parentElement;
@@ -194,6 +207,10 @@ async function interactWithPost(page, targetLikeButton, config) {
       log("Không tìm thấy nút Bình luận bên cạnh nút Like.", "error");
   }
 
+  // Đóng khung bình luận còn mở và đưa chuột ra góc màn hình để bảng cảm xúc /
+  // ô bình luận của bài này không ảnh hưởng thao tác với bài tiếp theo
+  await page.keyboard.press("Escape");
+  await page.mouse.move(10, 10);
   await randomDelay(2, 3);
 
   return { reacted: true, commented };
@@ -219,15 +236,13 @@ async function processNewPosts(page, pageUrl, config) {
   await page.evaluate(() => window.scrollBy(0, 700));
   await randomDelay(1, 2);
 
-  // Cuộn thêm để tải nhiều bài viết hơn vào DOM (không chỉ bài đầu tiên),
-  // để có thể phát hiện TẤT CẢ bài viết mới thay vì chỉ bài mới nhất.
-  for (let i = 0; i < 3; i++) {
-    await page.evaluate(() => window.scrollBy(0, 900));
-    await randomDelay(1.5, 2.5);
-  }
+  // Quét tất cả bài viết đang có trong DOM và xác định nút Like của từng bài.
+  // Phải quét LẠI sau mỗi lần tương tác vì Facebook re-render feed sau khi
+  // thả cảm xúc/bình luận, làm marker và ElementHandle cũ không còn dùng được.
+  const scanCandidates = () => page.evaluate(() => {
+      // Gỡ marker của lần quét trước để không nhặt nhầm nút cũ
+      document.querySelectorAll('[data-bot-target]').forEach((el) => el.removeAttribute('data-bot-target'));
 
-  // Tìm TẤT CẢ bài viết đang có trong DOM và xác định nút Like của từng bài
-  const candidates = await page.evaluate(() => {
       const feedUnits = document.querySelectorAll('[aria-posinset]');
       const results = [];
       let idx = 0;
@@ -314,59 +329,86 @@ async function processNewPosts(page, pageUrl, config) {
       return results;
   });
 
-  if (candidates.length === 0) {
-      log("Không tìm thấy nút Like của bài viết nào trên trang. Có thể do mạng chậm, hãy thử lại.", "warn");
-      return;
-  }
-
-  let interactedCount = 0;
   const maxPostsPerCycle = config.maxPostsPerCycle || 5;
+  const MAX_SCROLL_STEPS = 10;
+  let interactedCount = 0;
+  let checkedCount = 0;
+  // Các bài đã xét trong chu kỳ này (kể cả bị bỏ qua) để không xét lại
+  const seenThisCycle = new Set();
 
-  for (const candidate of candidates) {
-      if (interactedCount >= maxPostsPerCycle) {
-          log(`Đã đạt giới hạn ${maxPostsPerCycle} bài/chu kỳ. Các bài còn lại sẽ được xử lý ở chu kỳ sau.`, "info");
-          break;
+  // Càn quét từ TRÊN XUỐNG: xử lý hết các bài đang render ở vị trí cuộn hiện tại
+  // rồi mới cuộn xuống tiếp. Lý do: Facebook virtualize feed - nếu cuộn xuống hết
+  // rồi mới quét một lần thì các bài ở đầu trang (nhất là bài share ảnh/video nặng)
+  // đã bị XÓA khỏi DOM và bot sẽ không bao giờ thấy chúng.
+  // "N bài gần nhất" = N bài đầu tiên gặp được tính từ đầu trang xuống.
+  for (let step = 0; step < MAX_SCROLL_STEPS && checkedCount < maxPostsPerCycle; step++) {
+      let domChanged = true;
+      while (domChanged && checkedCount < maxPostsPerCycle) {
+          domChanged = false;
+          const candidates = await scanCandidates();
+
+          for (const candidate of candidates) {
+              // Bài không lấy được URL thì nhận diện tạm theo vùng vị trí trên trang
+              const postId = candidate.postUrl
+                ? extractPostId(candidate.postUrl)
+                : `y-${Math.round(candidate.y / 120)}`;
+              if (seenThisCycle.has(postId)) continue;
+
+              seenThisCycle.add(postId);
+              checkedCount++;
+
+              if (candidate.alreadyReacted) {
+                  log("Bỏ qua bài đã tương tác (trạng thái trên trang).", "info");
+              } else if (candidate.postUrl && store.isProcessed(postId)) {
+                  log("Bỏ qua bài đã xử lý trước đó (theo lịch sử lưu trữ).", "info");
+              } else {
+                  const targetLikeButton = await page.$(`[data-bot-target="${candidate.marker}"]`);
+                  if (!targetLikeButton) {
+                      log("Nút Like không còn trong DOM (feed đã thay đổi), quét lại...", "warn");
+                  } else {
+                      log("Phát hiện bài viết mới chưa tương tác. Tiến hành thả cảm xúc.", "step");
+                      try {
+                          const { reacted, commented } = await interactWithPost(page, targetLikeButton, config);
+
+                          store.markProcessed(postId, {
+                            url: candidate.postUrl || "inline-interaction",
+                            postType: "status",
+                            reacted,
+                            commented,
+                            reaction: config.reaction
+                          });
+
+                          interactedCount++;
+                          log("Đã hoàn tất toàn bộ thao tác cho bài viết này!", "success");
+                      } catch (err) {
+                          log(`Lỗi khi tương tác với bài viết: ${err.message}. Bỏ qua bài này, sẽ thử lại ở chu kỳ sau.`, "error");
+                      }
+
+                      // Chờ ngẫu nhiên trước khi chuyển sang bài viết tiếp theo
+                      const delayCfg = config.delayBetweenActions || {};
+                      await randomDelay(delayCfg.minSeconds || 5, delayCfg.maxSeconds || 10);
+                  }
+                  // DOM đã thay đổi sau tương tác (hoặc marker đã mất) - quét lại
+                  domChanged = true;
+              }
+
+              if (domChanged || checkedCount >= maxPostsPerCycle) break;
+          }
       }
 
-      if (candidate.alreadyReacted) {
-          log("Bỏ qua bài đã tương tác (trạng thái trên trang).", "info");
-          continue;
-      }
+      if (checkedCount >= maxPostsPerCycle) break;
 
-      const targetPostUrl = candidate.postUrl;
-      const postId = extractPostId(targetPostUrl || `inline-post-${Date.now()}-${candidate.marker}`);
-
-      if (targetPostUrl && store.isProcessed(postId)) {
-          log("Bỏ qua bài đã xử lý trước đó (theo lịch sử lưu trữ).", "info");
-          continue;
-      }
-
-      const targetLikeButton = await page.$(`[data-bot-target="${candidate.marker}"]`);
-      if (!targetLikeButton) continue;
-
-      log("Phát hiện bài viết mới chưa tương tác. Tiến hành thả cảm xúc.", "step");
-      const { reacted, commented } = await interactWithPost(page, targetLikeButton, config);
-
-      store.markProcessed(postId, {
-        url: targetPostUrl || "inline-interaction",
-        postType: "status",
-        reacted,
-        commented,
-        reaction: config.reaction
-      });
-
-      interactedCount++;
-      log("Đã hoàn tất toàn bộ thao tác cho bài viết này!", "success");
-
-      // Chờ ngẫu nhiên trước khi chuyển sang bài viết tiếp theo
-      const delayCfg = config.delayBetweenActions || {};
-      await randomDelay(delayCfg.minSeconds || 5, delayCfg.maxSeconds || 10);
+      // Cuộn xuống để Facebook render thêm bài cũ hơn
+      await page.evaluate(() => window.scrollBy(0, 850));
+      await randomDelay(1.5, 2.5);
   }
 
-  if (interactedCount === 0) {
-      log("Không có bài viết mới nào cần tương tác.", "info");
+  if (checkedCount === 0) {
+      log("Không tìm thấy bài viết nào trên trang. Có thể do mạng chậm, hãy thử lại.", "warn");
+  } else if (interactedCount === 0) {
+      log(`Đã kiểm tra ${checkedCount} bài viết gần nhất - không có bài mới nào cần tương tác.`, "info");
   } else {
-      log(`Đã tương tác với ${interactedCount} bài viết mới.`, "success");
+      log(`Đã kiểm tra ${checkedCount} bài viết gần nhất, tương tác ${interactedCount} bài mới.`, "success");
   }
 }
 
