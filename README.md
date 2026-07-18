@@ -64,6 +64,9 @@ npm start
 
 ```
 fb-automation/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml   # GitHub Actions: tự động deploy lên VPS khi push main
 ├── src/
 │   ├── auto-engage.js   # Logic chính điều khiển trình duyệt
 │   ├── utils.js         # Các hàm tiện ích (log, delay, xử lý URL)
@@ -71,8 +74,66 @@ fb-automation/
 ├── data/                # Nơi lưu trữ file JSON lịch sử
 ├── .browser-profile/    # Nơi lưu trữ cookie/session đăng nhập
 ├── config.json          # File cấu hình của người dùng
+├── ecosystem.config.js  # Cấu hình PM2 chạy bot trên VPS (qua xvfb)
 └── package.json         # Khai báo thư viện (Puppeteer)
 ```
+
+## Deploy tự động lên VPS (GitHub Actions)
+
+Mỗi lần push code lên nhánh `main`, workflow `.github/workflows/deploy.yml` sẽ:
+
+1. Chạy `npm run check` để kiểm tra cú pháp.
+2. SSH vào VPS, kéo code mới (`git reset --hard origin/main`), cài dependencies và restart bot bằng PM2.
+
+`config.json` trên VPS được backup/restore tự động trong lúc deploy, nên cấu hình thật trên server **không bị ghi đè** bởi file mẫu trong repo.
+
+Ngoài ra có thể deploy thủ công không cần push: tab **Actions** → **Deploy to VPS** → **Run workflow**.
+
+### 1. Chuẩn bị VPS (làm 1 lần)
+
+```bash
+sudo apt update && sudo apt install -y xvfb
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+sudo npm i -g pm2
+git clone https://github.com/hoaiphongpvt/auto-engagement-tool.git fb-bot && cd fb-bot
+npm ci
+# Tạo config.json thật trên server (file trong repo chỉ là mẫu)
+pm2 startup   # chạy lệnh nó in ra để bot tự khởi động lại khi VPS reboot
+```
+
+Nếu Puppeteer báo thiếu thư viện hệ thống (`libnss3`, `libatk`...), chạy:
+
+```bash
+npx puppeteer browsers install chrome --install-deps
+```
+
+**Đăng nhập Facebook:** bot mở trình duyệt non-headless nên trên VPS phải chạy qua `xvfb` (đã cấu hình sẵn trong `ecosystem.config.js`). Cách đơn giản nhất để có phiên đăng nhập: đăng nhập trên máy cá nhân trước, rồi nén thư mục `.browser-profile/` copy lên VPS.
+
+### 2. Tạo SSH key cho deploy
+
+Chạy trên máy cá nhân (ví dụ dưới dùng PowerShell trên Windows):
+
+```powershell
+ssh-keygen -t ed25519 -C "github-deploy-fb-bot" -f "$HOME\.ssh\fb_bot_deploy"
+# Bỏ trống passphrase (Enter). Đưa public key lên VPS:
+type "$HOME\.ssh\fb_bot_deploy.pub" | ssh <user>@<ip-vps> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+# Kiểm tra: phải in ra OK mà không hỏi password
+ssh -i "$HOME\.ssh\fb_bot_deploy" <user>@<ip-vps> "echo OK"
+```
+
+### 3. Khai báo secrets trên GitHub
+
+Vào repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+
+| Secret | Giá trị |
+|---------|--------|
+| `SSH_HOST` | IP hoặc domain của VPS |
+| `SSH_USER` | User SSH (vd: `ubuntu`) |
+| `SSH_KEY` | Toàn bộ nội dung file private key (`fb_bot_deploy`), gồm cả dòng `BEGIN`/`END` |
+| `SSH_PORT` | (Tùy chọn) Cổng SSH, mặc định 22 |
+| `DEPLOY_PATH` | Đường dẫn repo đã clone trên VPS, vd `/home/ubuntu/fb-bot` |
+
+**Lưu ý:** thư mục `DEPLOY_PATH` phải tồn tại và là repo đã clone (bước 1), nếu không workflow sẽ báo lỗi `cd: No such file or directory`. Không bao giờ commit private key vào repo.
 
 ## Lưu ý an toàn
 
