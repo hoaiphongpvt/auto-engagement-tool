@@ -142,5 +142,3 @@ Vào repo → **Settings** → **Secrets and variables** → **Actions** → **N
 2. Danh sách `comments` nên đa dạng nội dung.
 3. Luôn sử dụng Browser Profile để tránh phải đăng nhập lại nhiều lần dẫn đến checkpoint.
 
-## Giấy phép
-MIT
