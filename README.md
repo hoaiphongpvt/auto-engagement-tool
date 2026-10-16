@@ -141,4 +141,5 @@ Vào repo → **Settings** → **Secrets and variables** → **Actions** → **N
 1. Không nên đặt `checkIntervalMinutes` quá ngắn (nên từ 5-15 phút trở lên).
 2. Danh sách `comments` nên đa dạng nội dung.
 3. Luôn sử dụng Browser Profile để tránh phải đăng nhập lại nhiều lần dẫn đến checkpoint.
+4. Lệnh run pm2 start "xvfb-run -a node src/auto-engage.js" --name fb-bot
 
