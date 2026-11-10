@@ -122,7 +122,6 @@ async function interactWithPost(page, targetLikeButton, config) {
   } else {
       log(`Đã thả cảm xúc "${reaction}" thành công!`, "success");
   }
-
   await randomDelay(2, 3);
 
   // 3. Tìm nút bình luận (chỉ 2 cấp trên từ nút Like)
@@ -134,10 +133,14 @@ async function interactWithPost(page, targetLikeButton, config) {
           if (wrapper.parentElement) wrapper = wrapper.parentElement;
       }
       const btn = wrapper.querySelector(
+          // Old layout: exact labels
           'div[aria-label="Viết bình luận"][role="button"], ' +
           'div[aria-label="Leave a comment"][role="button"], ' +
           'div[aria-label="Bình luận"][role="button"], ' +
-          'div[aria-label="Comment"][role="button"]'
+          'div[aria-label="Comment"][role="button"], ' +
+          // New layout (2024+): full-sentence labels with page name
+          'div[aria-label*="Bình luận về bài viết"][role="button"], ' +
+          'div[aria-label*="Comment on"][role="button"]'
       );
       if (btn) { btn.click(); return true; }
       return false;
@@ -243,7 +246,18 @@ async function processNewPosts(page, pageUrl, config) {
       // Gỡ marker của lần quét trước để không nhặt nhầm nút cũ
       document.querySelectorAll('[data-bot-target]').forEach((el) => el.removeAttribute('data-bot-target'));
 
-      const feedUnits = document.querySelectorAll('[aria-posinset]');
+      // FIX: Use multiple fallback selectors to find feed items.
+      // Facebook frequently changes DOM; [aria-posinset] works in some layouts,
+      // [role="article"] in others. Try them in order and deduplicate.
+      let feedUnits = Array.from(document.querySelectorAll('[aria-posinset]'));
+      if (feedUnits.length === 0) {
+          feedUnits = Array.from(document.querySelectorAll('[role="article"]'));
+      }
+      if (feedUnits.length === 0) {
+          // Last resort: scan the whole page for Like buttons directly
+          feedUnits = [document.querySelector('[role="main"]') || document.body];
+      }
+
       const results = [];
       let idx = 0;
 
@@ -255,12 +269,19 @@ async function processNewPosts(page, pageUrl, config) {
           }
 
           const likeBtns = wrapper.querySelectorAll(
+              // Old FB layout: exact labels
               'div[aria-label="Thích"][role="button"], ' +
               'div[aria-label="Like"][role="button"], ' +
+              // New FB layout (2024+): full-sentence labels with page name
+              'div[aria-label*="Bày tỏ cảm xúc Thích"][role="button"], ' +
+              'div[aria-label*="Bày tỏ cảm xúc về bài viết"][role="button"], ' +
+              'div[aria-label*="React"][role="button"], ' +
+              // Already-reacted states
               'div[aria-label*="Gỡ Thích"], ' +
               'div[aria-label*="Remove Like"], ' +
               'div[aria-label*="Gỡ Yêu thích"], ' +
-              'div[aria-label*="Remove Love"]'
+              'div[aria-label*="Remove Love"], ' +
+              'div[aria-label*="Gỡ cảm xúc"]'
           );
 
           if (likeBtns.length === 0) continue;
@@ -295,10 +316,14 @@ async function processNewPosts(page, pageUrl, config) {
           const absoluteY = rect.top + window.scrollY;
 
           // Bỏ qua nút Like nằm trong header/avatar
-          if (absoluteY < 600) continue;
+          // FIX: Lowered threshold from 600 to 400 so the first post isn't skipped
+          if (absoluteY < 400) continue;
+
+          // Skip already-marked buttons (deduplication when using whole-page fallback)
+          if (targetBtn.hasAttribute('data-bot-target')) continue;
 
           const label = targetBtn.getAttribute('aria-label') || "";
-          const alreadyReacted = label.includes('Gỡ') || label.includes('Remove');
+          const alreadyReacted = label.includes('Gỡ') || label.includes('Remove') || label.includes('Đã');
 
           // Trích xuất URL bài viết để lưu lịch sử / kiểm tra trùng lặp
           let container = targetBtn;
@@ -309,7 +334,7 @@ async function processNewPosts(page, pageUrl, config) {
           const links = container.querySelectorAll('a[href]');
           for (const link of links) {
               const href = link.getAttribute('href');
-              if (href && (href.includes('/posts/') || href.includes('/photo/') || href.includes('fbid=') || href.includes('/videos/') || href.includes('/reel/'))) {
+              if (href && (href.includes('/posts/') || href.includes('/photo/') || href.includes('fbid=') || href.includes('/videos/') || href.includes('/reel/') || href.includes('pfbid'))) {
                   if (!href.includes('set=pb.') && !href.includes('set=a.') && !href.includes('makeprofile')) {
                       postUrl = href;
                       break;

@@ -109,21 +109,28 @@ async function fetchNewPosts(page, pageUrl) {
         const rect = link.getBoundingClientRect();
         const absoluteY = rect.top + window.scrollY;
         
-        // The avatar and cover photo are always at the top of the page (y < 600)
-        // Feed posts usually start much lower (y > 800+)
-        if (absoluteY < 600) {
+        // The avatar and cover photo are always at the top of the page (y < 500)
+        // Feed posts usually start much lower (y > 600+)
+        if (absoluteY < 500) {
             return true;
         }
 
         return false;
       };
 
+      // FIX: Pages using profile.php?id=... have targetAlias=null.
+      // Previously ALL posts with an alias-based URL were wrongly rejected.
+      // Now we only reject posts that:
+      //   (a) have an ?id= param that doesn't match OUR page id, OR
+      //   (b) have an alias-based path that explicitly doesn't match OUR alias.
+      // Generic path segments (pfbid, posts, photos, videos, reel, share, etc.)
+      // are not alias-based and must NOT trigger a rejection.
       const isBelongingToTargetPage = (url) => {
           if (!url) return false;
           try {
               const u = new URL(url);
               
-              // 1. Check ID param
+              // 1. Check ID param — if the post URL carries ?id= that differs from ours, reject
               const idParam = u.searchParams.get("id");
               if (idParam && targetId && idParam !== targetId) return false;
 
@@ -132,19 +139,26 @@ async function fetchNewPosts(page, pageUrl) {
               if (pathParts.length > 0) {
                   const firstPart = pathParts[0].toLowerCase();
                   
-                  // Ignore generic Facebook paths
-                  const genericPaths = ["photo", "photos", "video", "videos", "watch", "reel", "share", "permalink.php", "story.php", "profile.php", "p"];
+                  // Generic Facebook paths that do NOT encode the page identity
+                  const genericPaths = [
+                    "photo", "photos", "video", "videos", "watch", "reel",
+                    "share", "permalink.php", "story.php", "profile.php", "p",
+                    // pfbid & posts appear as first segment in many modern post URLs
+                    "posts", "pfbid"
+                  ];
                   
                   if (!genericPaths.includes(firstPart)) {
-                      // It means the first part of the URL is a username/alias!
+                      // The first path segment is a username/alias.
                       if (targetAlias && firstPart !== targetAlias.toLowerCase()) {
-                          return false; // It belongs to a DIFFERENT page!
+                          return false; // Belongs to a DIFFERENT page!
                       }
                       
-                      // If we don't have a targetAlias (our page uses profile.php), 
-                      // but this link HAS an alias, then it belongs to a different page!
-                      if (!targetAlias) {
-                          return false; 
+                      // Our page has no alias (profile.php?id=...) but this URL
+                      // has a username alias we don't recognise.
+                      // Only reject if we can verify via targetId — otherwise accept
+                      // (better to interact than miss posts).
+                      if (!targetAlias && targetId) {
+                          return false;
                       }
                   }
               }
