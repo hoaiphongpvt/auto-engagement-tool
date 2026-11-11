@@ -7,6 +7,7 @@ const { log, randomDelay, randomChoice, extractPostId } = require("./utils");
 const store = require("./store");
 
 const CONFIG_PATH = path.resolve(__dirname, "..", "config.json");
+const COOKIES_PATH = path.resolve(__dirname, "..", "cookies.json");
 const PROFILE_DIR = path.resolve(__dirname, "..", ".browser-profile");
 
 function loadConfig() {
@@ -30,6 +31,58 @@ function printBanner(config) {
   console.log(`- Interval: ${interval} minutes`);
   console.log(`- Processed: ${processedCount}`);
   console.log("--------------------------\n");
+}
+
+async function loadCookies(page) {
+  if (!fs.existsSync(COOKIES_PATH)) {
+    return false;
+  }
+  try {
+    const raw = fs.readFileSync(COOKIES_PATH, "utf8");
+    const rawCookies = JSON.parse(raw);
+    if (!Array.isArray(rawCookies) || rawCookies.length === 0) {
+      return false;
+    }
+
+    log(`Đang nạp ${rawCookies.length} cookie từ cookies.json...`, "info");
+
+    // Chuẩn hóa cookie cho Puppeteer / Chrome DevTools Protocol
+    const cookies = rawCookies.map((c) => {
+      const cookie = {
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path || "/",
+        secure: typeof c.secure === "boolean" ? c.secure : true,
+        httpOnly: typeof c.httpOnly === "boolean" ? c.httpOnly : false,
+      };
+
+      if (c.expirationDate || c.expires) {
+        cookie.expires = Math.floor(c.expirationDate || c.expires);
+      }
+
+      // Map sameSite sang định dạng CDP: 'Strict' | 'Lax' | 'None'
+      if (c.sameSite) {
+        const ss = String(c.sameSite).toLowerCase();
+        if (ss === "no_restriction" || ss === "none") {
+          cookie.sameSite = "None";
+        } else if (ss === "lax") {
+          cookie.sameSite = "Lax";
+        } else if (ss === "strict") {
+          cookie.sameSite = "Strict";
+        }
+      }
+
+      return cookie;
+    });
+
+    await page.setCookie(...cookies);
+    log("Đã nạp cookie thành công!", "success");
+    return true;
+  } catch (err) {
+    log(`Lỗi khi đọc file cookies.json: ${err.message}`, "error");
+    return false;
+  }
 }
 
 async function checkLogin(page) {
@@ -452,11 +505,23 @@ async function main() {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-accelerated-2d-canvas",
-      "--disable-gpu"
-    ]
+      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled"
+    ],
+    ignoreDefaultArgs: ["--enable-automation"]
   });
 
   const [page] = await browser.pages();
+
+  // Ẩn thuộc tính webdriver để tránh bị Facebook phát hiện bot
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => undefined,
+    });
+  });
+
+  // Tự động nạp cookies từ file cookies.json nếu có
+  await loadCookies(page);
 
   // Check login status
   const isLoggedIn = await checkLogin(page);

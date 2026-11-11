@@ -27,7 +27,9 @@ Chỉnh sửa các thông số trong file `config.json` (xem chi tiết ở ph�
 npm start
 ```
 
-**Lưu ý:** Lần đầu chạy, trình duyệt sẽ mở ra. Nếu chưa đăng nhập, bạn hãy tự tay đăng nhập vào Facebook, sau đó quay lại terminal nhấn **Enter**. Các lần sau bot sẽ tự động sử dụng phiên đăng nhập cũ.
+**Lưu ý đăng nhập:**
+- **Cách 1 (Tự động qua Cookie):** Đặt file `cookies.json` ở thư mục gốc của bot. Bot sẽ tự động nạp cookie để đăng nhập trực tiếp (khắc phục hoàn toàn việc bị kẹt xác thực 2 bước trên VPS).
+- **Cách 2 (Đăng nhập thủ công):** Lần đầu chạy, trình duyệt sẽ mở ra. Nếu chưa có cookie, bạn hãy tự tay đăng nhập vào Facebook, sau đó quay lại terminal nhấn **Enter**. Các lần sau bot sẽ tự động sử dụng phiên đăng nhập cũ trong `.browser-profile/`.
 
 ## Cấu hình (config.json)
 

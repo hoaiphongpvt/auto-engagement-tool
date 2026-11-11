@@ -29,11 +29,13 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}
-            # config.json trên server là config thật (khác repo) — backup trước khi reset
+            # config.json và cookies.json trên server là dữ liệu nhạy cảm — backup trước khi reset
             if [ -f config.json ]; then cp config.json /tmp/fb-bot-config.json.bak; fi
+            if [ -f cookies.json ]; then cp cookies.json /tmp/fb-bot-cookies.json.bak; fi
             git fetch origin main
             git reset --hard origin/main
             if [ -f /tmp/fb-bot-config.json.bak ]; then cp /tmp/fb-bot-config.json.bak config.json; fi
+            if [ -f /tmp/fb-bot-cookies.json.bak ]; then cp /tmp/fb-bot-cookies.json.bak cookies.json; fi
             npm ci --omit=dev
             pm2 startOrReload ecosystem.config.js
             pm2 save

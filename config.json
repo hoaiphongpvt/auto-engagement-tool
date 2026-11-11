@@ -1,7 +1,8 @@
 {
   "pageUrls": [
     "https://www.facebook.com/profile.php?id=61577828144363",
-    "https://www.facebook.com/profile.php?id=61578987511264"
+    "https://www.facebook.com/profile.php?id=61578987511264",
+    "https://www.facebook.com/trungthanhvohan"
   ],
   "checkIntervalMinutes": 60,
   "maxPostsPerCycle": 5,
